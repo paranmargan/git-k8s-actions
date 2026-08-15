@@ -55,3 +55,19 @@ jobs:
       - name: Docker version
         run: |
           docker --version
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA} \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push \
+            ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}
+
+      - name: Display pushed image
+        run: |
+          echo "Image pushed:"
+          echo "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
