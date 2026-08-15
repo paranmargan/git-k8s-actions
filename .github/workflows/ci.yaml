@@ -9,6 +9,11 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  PROJECT_ID: project-5706452a-7c84-467b-abb
+  REGION: us-central1
+  REPOSITORY: k8s-images
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,24 +32,25 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: "projects/600309486002/locations/global/workloadIdentityPools/github-pool2/providers/github-provider"
-          service_account: "github-gke-deployer@project-5706452a-7c84-467b-abb.iam.gserviceaccount.com"
+          service_account: "github-gke-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure GCP project
         run: |
-          gcloud config set project PROJECT_ID
+          gcloud config set project $PROJECT_ID
 
       - name: Verify Google Cloud authentication
         run: |
+          echo "Project: $PROJECT_ID"
           gcloud auth list
           gcloud config get-value project
 
       - name: List Artifact Registry repositories
         run: |
           gcloud artifacts repositories list \
-            --location=us-central1
+            --location=$REGION
 
       - name: Docker version
         run: |
