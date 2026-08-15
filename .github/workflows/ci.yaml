@@ -13,6 +13,7 @@ env:
   PROJECT_ID: project-5706452a-7c84-467b-abb
   REGION: us-central1
   REPOSITORY: k8s-images
+  IMAGE_NAME: github-demo
 
 jobs:
   build:
