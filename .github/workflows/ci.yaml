@@ -1,23 +1,51 @@
 name: GKE CI-CD
 
 on:
- push:
-   branches:
-     - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   build:
-   runs-on: ubuntu-latest
-   
-   steps:
-    - name: checkout repository
-      uses: actions/checkout@v4
+    runs-on: ubuntu-latest
 
-    - name: Display information
-      run: |
-        echo "Github Actions started"
-        echo "Commit: $GITHUB_SHA"
-        echo "Repository: $GITHUB_REPOSITORY"
-    
-    - name: Docker version
-      run: docker --version
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Display information
+        run: |
+          echo "GitHub Actions started"
+          echo "Commit: $GITHUB_SHA"
+          echo "Repository: $GITHUB_REPOSITORY"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: "projects/600309486002/locations/global/workloadIdentityPools/github-pool2/providers/github-provider"
+          service_account: "github-gke-deployer@project-5706452a-7c84-467b-abb.iam.gserviceaccount.com"
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure GCP project
+        run: |
+          gcloud config set project PROJECT_ID
+
+      - name: Verify Google Cloud authentication
+        run: |
+          gcloud auth list
+          gcloud config get-value project
+
+      - name: List Artifact Registry repositories
+        run: |
+          gcloud artifacts repositories list \
+            --location=us-central1
+
+      - name: Docker version
+        run: |
+          docker --version
