@@ -1,0 +1,23 @@
+name: GKE CI-CD
+
+on:
+ push:
+   branches:
+     - main
+
+jobs:
+  build:
+   runs-on: ubuntu:latest
+   
+   steps:
+    - name: checkout repository
+      uses: actions/checkout@v4
+
+    - name: Display information
+      run: |
+        echo "Github Actions started"
+        echo "Commit: $GITHUB_SHA"
+        echo "Repository: $GITHUB_REPOSITORY"
+    
+    - name: Docker version
+      run: docker --version
