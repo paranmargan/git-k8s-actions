@@ -127,15 +127,21 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Install GKE auth plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+          gke-gcloud-auth-plugin --version
+          
       - name: Install Kustomize
         run: |
           curl -s \
-            "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" \
-            | bash
-
+          "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" \
+          | bash
+          
           sudo mv kustomize /usr/local/bin/kustomize
-
+          
           kustomize version
+    
 
       - name: Get DEV cluster credentials
         run: |
@@ -198,9 +204,16 @@ jobs:
         with:
           workload_identity_provider: "projects/600309486002/locations/global/workloadIdentityPools/github-pool2/providers/github-provider"
           service_account: "github-gke-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
+  
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
+
+
+      - name: Install GKE auth plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+          gke-gcloud-auth-plugin --version    
 
       - name: Install Kustomize
         run: |
