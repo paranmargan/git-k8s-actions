@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: prod
+
+resources:
+  - ../../base
+  - namespace.yaml
+
+
+replicas:
+  - name: github-demo
+    count: 3
+images:
+  - name: us-central1-docker.pkg.dev/project-5706452a-7c84-467b-abb/k8s-images/github-demo
+    newTag: prod-test

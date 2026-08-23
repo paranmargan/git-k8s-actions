@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: github-demo
+  template:
+    metadata:
+      labels:
+        app: github-demo
+    spec:
+      containers:
+        - name: github-demo
+          image: us-central1-docker.pkg.dev/project-5706452a-7c84-467b-abb/k8s-images/github-demo:placeholder
+          ports:
+            - containerPort: 80
+          
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80  
+            initialDelaySeconds: 3  
+            periodSeconds: 5
+
+          livenessProbe:
+            httpGet:  
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 5

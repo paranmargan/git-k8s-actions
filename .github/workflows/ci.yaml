@@ -12,14 +12,15 @@ permissions:
 env:
   PROJECT_ID: project-5706452a-7c84-467b-abb
   REGION: us-central1
-  ZONE: us-central1-a
-  CLUSTER: gke-prod-lab
   REPOSITORY: k8s-images
   IMAGE_NAME: github-demo
-  DEPLOYMENT: github-demo
-  NAMESPACE: observability-demo
+
 jobs:
-  build:
+
+  # =========================================================
+  # 1. TEST
+  # =========================================================
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -28,9 +29,39 @@ jobs:
 
       - name: Display information
         run: |
-          echo "GitHub Actions started"
           echo "Commit: $GITHUB_SHA"
           echo "Repository: $GITHUB_REPOSITORY"
+
+      - name: Verify required files
+        run: |
+          test -f Dockerfile || {
+            echo "Dockerfile not found!"
+            exit 1
+          }
+
+          test -f index.html || {
+            echo "index.html not found!"
+            exit 1
+          }
+
+      - name: Validate HTML
+        run: |
+          grep -qi "GitHub Actions" index.html
+
+
+  # =========================================================
+  # 2. BUILD
+  # =========================================================
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -43,22 +74,7 @@ jobs:
 
       - name: Configure GCP project
         run: |
-          gcloud config set project $PROJECT_ID
-
-      - name: Verify Google Cloud authentication
-        run: |
-          echo "Project: $PROJECT_ID"
-          gcloud auth list
-          gcloud config get-value project
-
-      - name: List Artifact Registry repositories
-        run: |
-          gcloud artifacts repositories list \
-            --location=$REGION
-
-      - name: Docker version
-        run: |
-          docker --version
+          gcloud config set project "$PROJECT_ID"
 
       - name: Configure Docker for Artifact Registry
         run: |
@@ -70,6 +86,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push AMD64 image
+        id: docker-build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -78,70 +95,159 @@ jobs:
           tags: |
             ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
-      - name: Display pushed image
+      - name: Create immutable image reference
+        id: image
         run: |
-          echo "Image pushed successfully:"
-          echo "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}@${{ steps.docker-build.outputs.digest }}"
 
-      - name: Install GKE auth plugin
+          echo "Immutable image:"
+          echo "$IMAGE"
+
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+
+  # =========================================================
+  # 3. DEPLOY DEV
+  # =========================================================
+  deploy-dev:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: "projects/600309486002/locations/global/workloadIdentityPools/github-pool2/providers/github-provider"
+          service_account: "github-gke-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Kustomize
         run: |
-          gcloud components install gke-gcloud-auth-plugin --quiet
+          curl -s \
+            "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" \
+            | bash
 
+          sudo mv kustomize /usr/local/bin/kustomize
 
-      # -----------------------------------------------------
-      # Connect to GKE through Connect Gateway
-      # -----------------------------------------------------
-      - name: Get GKE credentials through Connect Gateway
+          kustomize version
+
+      - name: Get DEV cluster credentials
         run: |
-          gcloud container fleet memberships get-credentials "$CLUSTER" \
+          gcloud container fleet memberships get-credentials \
+            "${{ vars.CLUSTER }}" \
             --project="$PROJECT_ID"
 
-      # -----------------------------------------------------
-      # Verify GitHub runner -> Connect Gateway -> GKE
-      # -----------------------------------------------------
-      - name: Verify GKE connectivity
+      - name: Set DEV image
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
         run: |
-          kubectl cluster-info
-          kubectl get nodes
+          cd k8s/overlays/dev
 
-      # -----------------------------------------------------
-      # Deploy new image
-      # -----------------------------------------------------
-      - name: Deploy new image to GKE
+          echo "Using immutable image:"
+          echo "$IMAGE"
+
+          kustomize edit set image \
+            us-central1-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}="$IMAGE"
+
+      - name: Show rendered DEV manifest
         run: |
-          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          kubectl kustomize k8s/overlays/dev
 
-          echo "Deploying image:"
-          echo "${IMAGE}"
-
-          kubectl set image deployment/${DEPLOYMENT} \
-            ${IMAGE_NAME}="${IMAGE}" \
-            -n "${NAMESPACE}"
-
-      # -----------------------------------------------------
-      # Wait until Kubernetes completes RollingUpdate
-      # -----------------------------------------------------
-      - name: Wait for rollout
+      - name: Deploy DEV
         run: |
-          kubectl rollout status deployment/${DEPLOYMENT} \
-            -n "${NAMESPACE}" \
+          kubectl apply \
+            -k k8s/overlays/dev
+
+      - name: Wait for DEV rollout
+        run: |
+          kubectl rollout status \
+            deployment/${IMAGE_NAME} \
+            -n "${{ vars.NAMESPACE }}" \
             --timeout=180s
 
-      # -----------------------------------------------------
-      # Verify final deployment
-      # -----------------------------------------------------
-      - name: Verify deployed image
+      - name: Verify DEV image
         run: |
-          echo "Current Deployment image:"
-
-          kubectl get deployment ${DEPLOYMENT} \
-            -n "${NAMESPACE}" \
+          kubectl get deployment ${IMAGE_NAME} \
+            -n "${{ vars.NAMESPACE }}" \
             -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
 
-          echo ""
-          echo "Pods:"
 
-          kubectl get pods \
-            -n "${NAMESPACE}" \
-            -l app=${DEPLOYMENT} \
-            -o wide
+  # =========================================================
+  # 4. DEPLOY PROD
+  # =========================================================
+  deploy-prod:
+    needs:
+      - build
+      - deploy-dev
+
+    runs-on: ubuntu-latest
+    environment: prod
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: "projects/600309486002/locations/global/workloadIdentityPools/github-pool2/providers/github-provider"
+          service_account: "github-gke-deployer@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Kustomize
+        run: |
+          curl -s \
+            "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" \
+            | bash
+
+          sudo mv kustomize /usr/local/bin/kustomize
+
+          kustomize version
+
+      - name: Get PROD cluster credentials
+        run: |
+          gcloud container fleet memberships get-credentials \
+            "${{ vars.CLUSTER }}" \
+            --project="$PROJECT_ID"
+
+      - name: Set PROD image
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          cd k8s/overlays/prod
+
+          echo "Promoting exact image:"
+          echo "$IMAGE"
+
+          kustomize edit set image \
+            us-central1-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}="$IMAGE"
+
+      - name: Show rendered PROD manifest
+        run: |
+          kubectl kustomize k8s/overlays/prod
+
+      - name: Deploy PROD
+        run: |
+          kubectl apply \
+            -k k8s/overlays/prod
+
+      - name: Wait for PROD rollout
+        run: |
+          kubectl rollout status \
+            deployment/${IMAGE_NAME} \
+            -n "${{ vars.NAMESPACE }}" \
+            --timeout=180s
+
+      - name: Verify PROD image
+        run: |
+          kubectl get deployment ${IMAGE_NAME} \
+            -n "${{ vars.NAMESPACE }}" \
+            -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
